@@ -13,54 +13,42 @@ export const registrarPesaje = async (req, res) => {
         client = await pool.connect();
         const datos = validacion.data;
         
-        // Cálculo del Peso Neto (Validación de seguridad en el backend)
+        // Cálculo del Peso Neto
         const peso_neto_kg = parseFloat(datos.peso_bruto_kg) - parseFloat(datos.peso_tara_kg);
         
         if (peso_neto_kg <= 0) {
             return res.status(400).json({ error: 'El peso bruto debe ser mayor a la tara.' });
         }
 
-        // Captura segura del ID de usuario (Dependiendo de cómo lo llame tu middleware)
-        const usuario_id = req.usuario?.id || req.user?.id || req.user?.USUARI_ID; 
+        const usuario_id = req.usuario?.id || req.user?.id; 
 
         if (!usuario_id) {
             return res.status(401).json({ error: 'Falta identificación del usuario en el token.' });
         }
 
-        // LÓGICA DEL TICKET: Buscar el último consecutivo de ESTE mes en la tabla estandarizada (TT_PESAJE)
+        // Buscar el último consecutivo
         const ticketResult = await client.query(`
-            SELECT COALESCE(MAX("PESAJE_TK"), 0) + 1 AS siguiente_ticket
-            FROM "TT_PESAJE"
-            WHERE EXTRACT(MONTH FROM "PESAJE_FR") = EXTRACT(MONTH FROM CURRENT_DATE)
-              AND EXTRACT(YEAR FROM "PESAJE_FR") = EXTRACT(YEAR FROM CURRENT_DATE)
+            SELECT COALESCE(MAX(consecutivo_ticket), 0) + 1 AS siguiente_ticket
+            FROM registro_pesaje
+            WHERE EXTRACT(MONTH FROM fecha_registro) = EXTRACT(MONTH FROM CURRENT_DATE)
+              AND EXTRACT(YEAR FROM fecha_registro) = EXTRACT(YEAR FROM CURRENT_DATE)
         `);
         const consecutivo_ticket = ticketResult.rows[0].siguiente_ticket;
 
-        // Inserción utilizando los nombres de campos estandarizados (PESAJE_XX)
+        // Insertar en la tabla original
         const query = `
-            INSERT INTO "TT_PESAJE" (
-                "PESAJE_TK", "PESAJE_IU", "PESAJE_CA", "PESAJE_CC", 
-                "PESAJE_TR", "PESAJE_CM", "PESAJE_MI", "PESAJE_CP", 
-                "PESAJE_PB", "PESAJE_PT", "PESAJE_PN", "PESAJE_NG", "PESAJE_PG", "PESAJE_RF"
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-            RETURNING "PESAJE_TK" AS consecutivo_ticket, "PESAJE_PN" AS peso_neto_kg;
+            INSERT INTO registro_pesaje (
+                consecutivo_ticket, id_usuario, codigo_alianza, codigo_conductor, 
+                codigo_transporte, codigo_camion, codigo_mina, codigo_comprador, 
+                peso_bruto_kg, peso_tara_kg, peso_neto_kg, numero_guia, peso_numero_guia_kg, registro_fotografico_url, estado
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'Pendiente')
+            RETURNING *;
         `;
         
         const valores = [
-            consecutivo_ticket, 
-            usuario_id, 
-            datos.codigo_alianza, 
-            datos.codigo_conductor, 
-            datos.codigo_transporte, 
-            datos.codigo_camion, 
-            datos.codigo_mina, 
-            datos.codigo_comprador, 
-            datos.peso_bruto_kg, 
-            datos.peso_tara_kg, 
-            peso_neto_kg, 
-            datos.numero_guia, 
-            datos.peso_numero_guia_kg, 
-            datos.registro_fotografico_url || null
+            consecutivo_ticket, usuario_id, datos.codigo_alianza, datos.codigo_conductor, 
+            datos.codigo_transporte, datos.codigo_camion, datos.codigo_mina, datos.codigo_comprador, 
+            datos.peso_bruto_kg, datos.peso_tara_kg, peso_neto_kg, datos.numero_guia, datos.peso_numero_guia_kg, datos.registro_fotografico_url || null
         ];
 
         const result = await client.query(query, valores);
@@ -78,31 +66,32 @@ export const registrarPesaje = async (req, res) => {
     }
 };
 
-// 2. Obtener el historial (Adaptado a las nuevas tablas relacionadas Estandarizadas)
+// 2. Obtener el historial (Adaptado a las tablas originales)
 export const obtenerHistorialPesajes = async (req, res) => {
     let client;
     try {
         client = await pool.connect();
         
-        // Hacemos LEFT JOIN a las tablas Maestras (TM_) y alias para que el Frontend de React lo entienda sin cambiar nada
+        // Hacemos JOIN usando tus tablas originales
         const query = `
             SELECT 
-                p."PESAJE_ID" AS id_registro, 
-                p."PESAJE_TK" AS consecutivo_ticket, 
-                p."PESAJE_FR" AS fecha_registro, 
-                p."PESAJE_HR" AS hora_registro, 
-                cam."CAMION_PL" AS placa, 
-                cond."CONDUC_NO" AS chofer, 
-                m."ZMINAS_NE" AS mina, 
-                comp."COMPRA_RS" AS comprador, 
-                p."PESAJE_PN" AS peso_neto_kg, 
-                p."PESAJE_NG" AS numero_guia
-            FROM "TT_PESAJE" p
-            LEFT JOIN "TM_CAMION" cam ON p."PESAJE_CM" = cam."CAMION_CO"
-            LEFT JOIN "TM_CONDUC" cond ON p."PESAJE_CC" = cond."CONDUC_CO"
-            LEFT JOIN "TM_ZMINAS" m ON p."PESAJE_MI" = m."ZMINAS_CO"
-            LEFT JOIN "TM_COMPRA" comp ON p."PESAJE_CP" = comp."COMPRA_CO"
-            ORDER BY p."PESAJE_FR" DESC, p."PESAJE_HR" DESC;
+                r.id_registro, 
+                r.consecutivo_ticket, 
+                r.fecha_registro, 
+                r.hora_registro, 
+                cam.placa, 
+                cond.nombre_conductor AS chofer, 
+                m.nombre_encargado AS mina, 
+                comp.razon_social AS comprador, 
+                r.peso_neto_kg, 
+                r.numero_guia,
+                r.estado
+            FROM registro_pesaje r
+            LEFT JOIN camiones cam ON r.codigo_camion = cam.codigo_camion
+            LEFT JOIN conductores cond ON r.codigo_conductor = cond.codigo_conductor
+            LEFT JOIN minas m ON r.codigo_mina = m.codigo_mina
+            LEFT JOIN compradores comp ON r.codigo_comprador = comp.codigo_comprador
+            ORDER BY r.fecha_registro DESC, r.hora_registro DESC;
         `;
         
         const result = await client.query(query);
@@ -111,6 +100,45 @@ export const obtenerHistorialPesajes = async (req, res) => {
     } catch (error) {
         console.error('❌ Error al obtener el historial de pesajes:', error.message);
         res.status(500).json({ error: 'Error interno al consultar la base de datos.' });
+    } finally {
+        if (client) client.release();
+    }
+};
+
+// 3. Auditar/Verificar un pesaje (Rol Inspector)
+export const auditarPesaje = async (req, res) => {
+    let client;
+    try {
+        const { id } = req.params; // ID del registro
+        const { estado } = req.body; // 'Aprobado' o 'Discrepancia'
+
+        if (!['Aprobado', 'Discrepancia'].includes(estado)) {
+            return res.status(400).json({ error: 'Estado de auditoría inválido.' });
+        }
+
+        client = await pool.connect();
+        
+        const query = `
+            UPDATE registro_pesaje 
+            SET estado = $1 
+            WHERE id_registro = $2 
+            RETURNING consecutivo_ticket, estado;
+        `;
+        
+        const result = await client.query(query, [estado, id]);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Ticket no encontrado en la base de datos.' });
+        }
+
+        res.status(200).json({ 
+            mensaje: 'Auditoría registrada con éxito.',
+            ticket: result.rows[0]
+        });
+
+    } catch (error) {
+        console.error('❌ Error al auditar pesaje:', error.message);
+        res.status(500).json({ error: 'Error interno al procesar la auditoría.' });
     } finally {
         if (client) client.release();
     }

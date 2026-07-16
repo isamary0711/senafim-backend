@@ -4,7 +4,6 @@ import { pool } from '../config/db.js';
 
 export const login = async (req, res) => {
     try {
-        console.log("=========================================");
         console.log("🕵️ INICIANDO INTENTO DE LOGIN");
         
         const correo = req.body.correo;
@@ -14,53 +13,40 @@ export const login = async (req, res) => {
             return res.status(400).json({ error: 'Por favor ingrese correo y contraseña.' });
         }
 
-        // 2. Buscamos al usuario en la tabla maestra estandarizada "TM_USUARI"
-        // NOTA: Usamos comillas dobles en PostgreSQL para los identificadores en mayúsculas
-        console.log(`🔍 Buscando usuario en TM_USUARI: ${correo}`);
-        const userResult = await pool.query('SELECT * FROM "TM_USUARI" WHERE "USUARI_EM" = $1', [correo]);
+        // Buscamos en tu tabla original: 'usuarios'
+        const userResult = await pool.query('SELECT * FROM usuarios WHERE correo = $1', [correo]);
         
         if (userResult.rows.length === 0) {
-            console.log("❌ Error: Usuario no encontrado.");
             return res.status(401).json({ error: 'Credenciales inválidas.' });
         }
 
         const usuario = userResult.rows[0];
 
-        // 3. Verificación de estado (Suponiendo que tu columna es USUARI_AC)
-        if (usuario.USUARI_AC === false) { 
+        if (usuario.activo === false) { 
             return res.status(403).json({ error: 'Usuario inhabilitado. Contacte al administrador.' });
         }
 
-        // 4. Verificación de contraseña (Mapeo a PWD)
-        const validPassword = await bcrypt.compare(passwordFront, usuario.USUARI_PW);
+        const validPassword = await bcrypt.compare(passwordFront, usuario.password);
         
         if (!validPassword) {
-            console.log("❌ Error: Contraseña incorrecta.");
             return res.status(401).json({ error: 'Credenciales inválidas.' });
         }
 
-        // 5. Fabricamos el Token (Payload: id y rol)
-        // IMPORTANTE: Asegúrate de que el nombre de la columna del rol sea USUARI_RL
+        // IMPORTANTE: Aseguramos inyectar el ROL en el token
         const token = jwt.sign(
-            { 
-                id: usuario.USUARI_ID, 
-                rol: usuario.USUARI_RL 
-            },
+            { id: usuario.id, rol: usuario.rol },
             process.env.JWT_SECRET,
             { expiresIn: '8h' }
         );
-
-        console.log("🚀 Login exitoso. Rol detectado:", usuario.USUARI_RL);
-        console.log("=========================================");
 
         res.json({
             mensaje: 'Inicio de sesión exitoso.',
             token,
             usuario: {
-                id: usuario.USUARI_ID,
-                nombre: usuario.USUARI_NO,
-                correo: usuario.USUARI_EM,
-                rol: usuario.USUARI_RL
+                id: usuario.id,
+                nombre: usuario.nombre,
+                correo: usuario.correo,
+                rol: usuario.rol
             }
         });
 
