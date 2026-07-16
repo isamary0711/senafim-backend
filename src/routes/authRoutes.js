@@ -1,9 +1,10 @@
-import express from 'express';
+import { Router } from 'express';
 import { login } from '../controllers/authController.js';
+import { loginLimiter } from '../middlewares/rateLimitMiddleware.js'; // Importamos el limitador
 
-const router = express.Router();
+const router = Router();
 
-// Definimos que al recibir un POST en esta ruta, se ejecute nuestro controlador
-router.post('/login', login);
+// Aplicamos 'loginLimiter' únicamente al endpoint de login
+router.post('/login', loginLimiter, login);
 
 export default router;
