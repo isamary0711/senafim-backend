@@ -7,72 +7,60 @@ export const login = async (req, res) => {
         console.log("=========================================");
         console.log("🕵️ INICIANDO INTENTO DE LOGIN");
         
-        // 1. Recibimos los datos que envía el frontend
-        // Usamos un fallback por si tu React lo envía como 'clave' o 'contrasena'
         const correo = req.body.correo;
         const passwordFront = req.body.password || req.body.clave || req.body.contrasena; 
 
-        console.log(`Datos recibidos -> Correo: ${correo}, Clave recibida: ${passwordFront ? 'SÍ' : 'NO'}`);
-
         if (!correo || !passwordFront) {
-            console.log("❌ Error: Faltan datos en la petición del frontend.");
             return res.status(400).json({ error: 'Por favor ingrese correo y contraseña.' });
         }
 
-        // 2. Buscamos al usuario en la base de datos de PostgreSQL
-        console.log(`🔍 Buscando usuario en Neon: ${correo}`);
-        const userResult = await pool.query('SELECT * FROM usuarios WHERE correo = $1', [correo]);
+        // 2. Buscamos al usuario en la tabla maestra estandarizada "TM_USUARI"
+        // NOTA: Usamos comillas dobles en PostgreSQL para los identificadores en mayúsculas
+        console.log(`🔍 Buscando usuario en TM_USUARI: ${correo}`);
+        const userResult = await pool.query('SELECT * FROM "TM_USUARI" WHERE "USUARI_EM" = $1', [correo]);
         
         if (userResult.rows.length === 0) {
-            console.log("❌ Error: Usuario no encontrado en la base de datos.");
+            console.log("❌ Error: Usuario no encontrado.");
             return res.status(401).json({ error: 'Credenciales inválidas.' });
         }
 
         const usuario = userResult.rows[0];
-        console.log("✅ Usuario encontrado en BD. ¿Tiene hash de password?:", !!usuario.password);
 
-        // 3. Verificamos si el usuario no ha sido despedido/suspendido
-        // CORRECCIÓN: Como la columna 'activo' aún no existe en Neon, verificamos explícitamente 
-        // que sea 'false' para bloquear, en lugar de bloquear si es 'undefined'.
-        if (usuario.activo === false) { 
-            console.log("❌ Error: El usuario está inhabilitado.");
+        // 3. Verificación de estado (Suponiendo que tu columna es USUARI_AC)
+        if (usuario.USUARI_AC === false) { 
             return res.status(403).json({ error: 'Usuario inhabilitado. Contacte al administrador.' });
         }
 
-        // 4. Comparamos la contraseña enviada con la encriptada en la base de datos
-        if (!usuario.password) {
-            console.log("❌ Error Crítico: La columna 'password' del usuario está vacía en Neon.");
-            return res.status(401).json({ error: 'Credenciales inválidas.' });
-        }
-
-        const validPassword = await bcrypt.compare(passwordFront, usuario.password);
+        // 4. Verificación de contraseña (Mapeo a PWD)
+        const validPassword = await bcrypt.compare(passwordFront, usuario.USUARI_PW);
         
         if (!validPassword) {
-            console.log("❌ Error: La contraseña ingresada no coincide con el hash.");
+            console.log("❌ Error: Contraseña incorrecta.");
             return res.status(401).json({ error: 'Credenciales inválidas.' });
         }
 
-        console.log("🔓 ¡Contraseña validada matemáticamente con éxito!");
-
-        // 5. Fabricamos el "Carnet Digital" (Token) válido por 8 horas
+        // 5. Fabricamos el Token (Payload: id y rol)
+        // IMPORTANTE: Asegúrate de que el nombre de la columna del rol sea USUARI_RL
         const token = jwt.sign(
-            { id: usuario.id, rol: usuario.rol },
+            { 
+                id: usuario.USUARI_ID, 
+                rol: usuario.USUARI_RL 
+            },
             process.env.JWT_SECRET,
             { expiresIn: '8h' }
         );
 
-        console.log("🚀 Login exitoso. Enviando token al frontend.");
+        console.log("🚀 Login exitoso. Rol detectado:", usuario.USUARI_RL);
         console.log("=========================================");
 
-        // 6. Damos la bienvenida al usuario (sin devolver la contraseña por seguridad)
         res.json({
             mensaje: 'Inicio de sesión exitoso.',
             token,
             usuario: {
-                id: usuario.id,
-                nombre: usuario.nombre,
-                correo: usuario.correo,
-                rol: usuario.rol
+                id: usuario.USUARI_ID,
+                nombre: usuario.USUARI_NO,
+                correo: usuario.USUARI_EM,
+                rol: usuario.USUARI_RL
             }
         });
 

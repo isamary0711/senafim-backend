@@ -1,12 +1,30 @@
 import { Router } from 'express';
 import { registrarPesaje, obtenerHistorialPesajes } from '../controllers/pesajeController.js';
-// Asegúrate de que la ruta y el nombre de tu middleware de autenticación coincidan:
 import { verificarToken } from '../middlewares/authMiddleware.js'; 
+
+// Importamos el guardián de roles
+import { permitirRoles } from '../middlewares/roleMiddleware.js'; 
 
 const router = Router();
 
-// Rutas protegidas (Requieren que el operador haya iniciado sesión y envíe su token)
-router.post('/', verificarToken, registrarPesaje);
-router.get('/', verificarToken, obtenerHistorialPesajes);
+// ================================================================
+// RUTAS TRANSACCIONALES DE PESAJE (LA ROMANA)
+// ================================================================
+
+// GET: Ver historial de pesajes 
+// -> Acceso: Operador (para ver su día) y Supervisor (para auditar)
+router.get('/', 
+    verificarToken, 
+    permitirRoles(['Operador', 'Supervisor']), 
+    obtenerHistorialPesajes
+);
+
+// POST: Registrar un nuevo ticket de pesaje
+// -> Acceso: EXCLUSIVO del Operador de Romana
+router.post('/', 
+    verificarToken, 
+    permitirRoles(['Operador']), 
+    registrarPesaje
+);
 
 export default router;
